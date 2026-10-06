@@ -7,9 +7,9 @@
 -- Este script:
 --   1) Crea las tablas clientes, productos y pedidos.
 --   2) Carga datos de ejemplo, incluyendo registros "sucios" a propósito
---      (nulos en precios/fechas, texto duplicado con distinta capitalización,
---      fechas fuera de rango) para poder demostrar una limpieza real
---      en analisis.sql, tal como pide la consigna.
+--      (pedidos sin precio o sin fecha, y productos sin precio de lista)
+--      para poder demostrar una limpieza real en analisis.sql, tal como
+--      pide la consigna.
 --
 -- Cómo ejecutar:
 --   1. Crear la base:      CREATE DATABASE capstone_project;
@@ -23,7 +23,11 @@
 -- CREATE DATABASE capstone_project;
 -- \c capstone_project
 
--- Reseteo de tablas para poder re-ejecutar el script sin errores
+-- Reseteo para poder re-ejecutar el script sin errores.
+-- Primero se elimina la vista pedidos_limpios (se crea en analisis.sql)
+-- porque depende de pedidos y productos: si existe, Postgres no deja
+-- borrar esas tablas y el script falla por la dependencia.
+DROP VIEW IF EXISTS pedidos_limpios;
 DROP TABLE IF EXISTS pedidos;
 DROP TABLE IF EXISTS productos;
 DROP TABLE IF EXISTS clientes;
@@ -125,7 +129,8 @@ INSERT INTO productos (nombre_producto, categoria, precio) VALUES
 ('Auriculares Inalámbricos Sport','Tecnología',    69999.00);
 
 -- =====================================================================
--- CARGA DE PEDIDOS (~160 pedidos entre enero y julio 2024)
+-- CARGA DE PEDIDOS (160 pedidos, de enero al 23 de agosto de 2024;
+-- agosto es un mes incompleto)
 -- Incluye adrede: precio_unitario NULL, fecha_pedido NULL y cantidades
 -- variadas para poder demostrar limpieza y agregaciones reales.
 -- =====================================================================

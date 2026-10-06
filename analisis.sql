@@ -70,7 +70,22 @@ SELECT
     COUNT(*) FILTER (WHERE fecha_faltante)  AS filas_con_fecha_faltante
 FROM pedidos_limpios;
 
--- 1.4 Verificación de la relación clientes-pedidos (evitar "explosión de
+-- 1.4 Verificación final de la limpieza (cierre del ciclo).
+-- Por qué: después de limpiar hay que demostrar qué quedó resuelto y qué
+-- no. Esperado: 0 precios nulos y 0 cantidades nulas (COALESCE los resolvió),
+-- 3 fechas nulas (se dejan marcadas a propósito: inventar una fecha sesgaría
+-- el análisis mensual) y 5 pedidos con precio 0.
+-- OJO: esos 5 ceros NO son ventas gratis, son importes DESCONOCIDOS (ni el
+-- pedido ni el producto tenían precio cargado). Por eso la facturación que
+-- calculamos más abajo puede estar SUBESTIMADA.
+SELECT
+    COUNT(*) FILTER (WHERE precio_unitario IS NULL)  AS precios_nulos,
+    COUNT(*) FILTER (WHERE cantidad IS NULL)         AS cantidades_nulas,
+    COUNT(*) FILTER (WHERE fecha_pedido IS NULL)     AS fechas_nulas,
+    COUNT(*) FILTER (WHERE precio_unitario = 0)      AS pedidos_con_precio_cero
+FROM pedidos_limpios;
+
+-- 1.5 Verificación de la relación clientes-pedidos (evitar "explosión de
 -- filas" en los JOINs). Por qué: pedidos.cliente_id y pedidos.producto_id
 -- son foreign keys de tablas con cliente_id/producto_id como PK, es decir
 -- la relación es 1-a-muchos en ambos casos, así que un INNER JOIN entre
@@ -91,10 +106,11 @@ SELECT
 
 -- -----------------------------------------------------------------
 -- Pregunta 1: Top 5 clientes por gasto total
--- Por qué filtramos por fecha_faltante = false: incluir pedidos sin
--- fecha no afecta el gasto total del cliente (igual pagó), así que acá
--- SÍ los dejamos adentro; lo que hacemos es no usar precios en cero
--- artificialmente si no hace falta (ya vienen resueltos por la vista).
+-- Por qué NO filtramos por fecha_faltante acá (a diferencia de la
+-- Pregunta 2): un pedido sin fecha igual representa una compra real
+-- que el cliente pagó, así que lo incluimos en su gasto histórico.
+-- La fecha solo es indispensable cuando agrupamos por mes (Pregunta 2);
+-- para el gasto total por cliente, no excluirla es la decisión correcta.
 -- -----------------------------------------------------------------
 SELECT
     c.cliente_id,
@@ -218,3 +234,40 @@ JOIN clientes c   ON c.cliente_id  = pl.cliente_id
 JOIN productos pr ON pr.producto_id = pl.producto_id
 GROUP BY c.ciudad, pr.categoria
 ORDER BY c.ciudad, ingresos DESC;
+
+-- -----------------------------------------------------------------
+-- Pregunta 7 (extra): Top 3 pedidos de mayor monto dentro de cada
+-- categoría, con RANK() sobre pedidos individuales (distinto de la
+-- Pregunta 4, que rankea productos por unidades vendidas).
+-- Por qué el desempate (fecha_pedido, pedido_id): hay muchos pedidos
+-- con el mismo monto (por ejemplo, 10 pedidos de $149.999 en Tecnología).
+-- Sin desempate, el top 3 devolvería 42 filas por los empates; con él,
+-- queda un ranking acotado y reproducible. Los pedidos sin fecha van
+-- últimos en el desempate (NULLS LAST) en lugar de inventarles una fecha.
+-- -----------------------------------------------------------------
+
+WITH pedidos_con_monto AS (
+    SELECT
+        pr.categoria,
+        pl.pedido_id,
+        c.nombre AS cliente,
+        pl.fecha_pedido,
+        pl.cantidad * pl.precio_unitario AS monto_pedido
+    FROM pedidos_limpios pl
+    JOIN productos pr ON pr.producto_id = pl.producto_id
+    JOIN clientes c   ON c.cliente_id   = pl.cliente_id
+),
+ranking AS (
+    SELECT
+        categoria, pedido_id, cliente, fecha_pedido, monto_pedido,
+        RANK() OVER (
+            PARTITION BY categoria
+            ORDER BY monto_pedido DESC, fecha_pedido ASC NULLS LAST, pedido_id
+        ) AS ranking_pedido_en_categoria
+    FROM pedidos_con_monto
+)
+SELECT *
+FROM ranking
+WHERE ranking_pedido_en_categoria <= 3
+ORDER BY categoria, ranking_pedido_en_categoria;
+
